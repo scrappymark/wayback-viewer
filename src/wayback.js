@@ -2,111 +2,200 @@ import { config } from './config.js';
 
 let releases = [];
 let currentReleaseIndex = -1;
+let waybackItemsPromise = null;
+const areaReleaseCache = new Map();
 
 /**
- * Fetch all Wayback imagery releases
- * Note: The official Esri Wayback API has changed.
- * This function now uses realistic mock data for demonstration.
+ * Fetch the Wayback releases that contain imagery changes at a map location.
  */
-export async function fetchReleases() {
-  try {
-    // Generate realistic mock releases based on actual Wayback data patterns
-    releases = generateRealisticReleases();
-
-    // Sort by date (newest first)
-    releases.sort((a, b) => b.date - a.date);
-
-    console.log(`✅ Loaded ${releases.length} Wayback releases`);
-    return releases;
-  } catch (error) {
-    console.error('Error fetching releases:', error);
-    releases = generateRealisticReleases();
-    return releases;
+export async function fetchReleases(point, zoom, options = {}) {
+  if (!point || !Number.isFinite(point.latitude) || !Number.isFinite(point.longitude)) {
+    throw new Error('A valid map location is required to load Wayback releases.');
   }
-}
 
-/**
- * Generate realistic mock releases based on actual Wayback patterns
- */
-function generateRealisticReleases() {
-  const now = new Date();
-  const releases = [];
+  const level = Math.max(config.map.minZoom, Math.min(config.map.maxZoom, Math.round(zoom)));
+  const { column, row } = getTileCoordinates(point, level);
+  const cacheKey = `${level}/${row}/${column}`;
 
-  // Real Wayback release pattern: monthly updates with specific dates
-  const releaseData = [
-    { year: 2026, months: [4] }, // May 2026
-    { year: 2025, months: [11, 8, 5, 2] },
-    { year: 2024, months: [10, 7, 4, 1] },
-    { year: 2023, months: [9, 6, 3, 0] },
-    { year: 2022, months: [11, 8, 5, 2] },
-    { year: 2021, months: [10, 7, 4, 1] },
-    { year: 2020, months: [9, 6, 3, 0] },
-    { year: 2019, months: [11, 8, 5, 2] },
-    { year: 2018, months: [10, 7, 4, 1] },
-    { year: 2017, months: [9, 6, 3, 0] },
-    { year: 2016, months: [11, 8, 5, 2] },
-    { year: 2015, months: [10, 7, 4, 1] },
-    { year: 2014, months: [11, 8, 5, 2] }
-  ];
+  let availableReleases = areaReleaseCache.get(cacheKey);
 
-  const providers = ['Maxar Technologies', 'Airbus Defence and Space', 'Planet Labs', 'DigitalGlobe'];
-  const resolutions = ['30 cm', '50 cm', '1 m', '2 m'];
+  if (!availableReleases) {
+    const waybackItems = await getWaybackItems();
+    const candidates = await getLocalChangeCandidates(
+      waybackItems,
+      { column, row, level },
+      options.signal
+    );
+    const releaseNumbers = new Set(
+      filterDuplicateCandidates(candidates, level).map(candidate => candidate.releaseNumber)
+    );
 
-  let idCounter = 0;
+    availableReleases = waybackItems.filter(item => releaseNumbers.has(item.releaseNum));
+    areaReleaseCache.set(cacheKey, availableReleases);
+  }
 
-  releaseData.forEach(yearData => {
-    yearData.months.forEach(month => {
-      const date = new Date(yearData.year, month, 28);
-      const provider = providers[Math.floor(Math.random() * providers.length)];
-      const resolution = resolutions[Math.floor(Math.random() * resolutions.length)];
+  releases = availableReleases;
+  currentReleaseIndex = releases.length ? 0 : -1;
 
-      releases.push({
-        id: `wayback-${idCounter++}`,
-        name: `${yearData.year}-${String(month + 1).padStart(2, '0')}`,
-        url: `https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/Wayback${yearData.year}${String(month + 1).padStart(2, '0')}/MapServer`,
-        imageUrl: `https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}`,
-        date: date,
-        year: yearData.year,
-        provider: provider,
-        resolution: resolution,
-        captureDate: date.toLocaleDateString('en-US', {
-          year: 'numeric',
-          month: 'long',
-          day: 'numeric'
-        })
-      });
-    });
-  });
-
+  console.log(`Loaded ${releases.length} Wayback releases for tile ${cacheKey}`);
   return releases;
 }
 
-/**
- * Generate mock releases for demo
- */
-function generateMockReleases() {
-  const now = new Date();
-  const mockData = [];
+async function getWaybackItems() {
+  if (!waybackItemsPromise) {
+    waybackItemsPromise = loadWaybackConfig().catch(error => {
+      waybackItemsPromise = null;
+      throw error;
+    });
+  }
 
-  // Generate releases for the past 5 years
-  for (let year = now.getFullYear(); year >= now.getFullYear() - 5; year--) {
-    for (let month = 11; month >= 0; month--) {
-      const date = new Date(year, month, 28);
-      mockData.push({
-        id: `release-${year}-${month}`,
-        name: `${year}-${String(month + 1).padStart(2, '0')}`,
-        url: `${config.wayback.baseUrl}/arcgis/rest/services/World_Imagery/Wayback${year}${String(month + 1).padStart(2, '0')}/MapServer`,
-        date: date,
-        year: year
-      });
+  return waybackItemsPromise;
+}
+
+async function loadWaybackConfig() {
+  let response;
+
+  try {
+    response = await fetch(config.wayback.configUrl);
+    if (!response.ok) {
+      throw new Error(`Wayback configuration request failed (${response.status})`);
+    }
+  } catch (error) {
+    response = await fetch('./waybackconfig.json');
+    if (!response.ok) {
+      throw new Error(`Local Wayback configuration request failed (${response.status})`);
     }
   }
 
-  return mockData;
+  return normalizeWaybackConfig(await response.json());
 }
 
 /**
- * Get releases grouped by year
+ * Convert the Wayback configuration object into releases used by the viewer.
+ */
+export function normalizeWaybackConfig(data) {
+  return Object.entries(data)
+    .map(([releaseNumber, item]) => {
+      const releaseDateLabel = getReleaseDateLabel(item);
+      const date = new Date(`${releaseDateLabel}T00:00:00Z`);
+
+      return {
+        id: item.itemID || item.layerIdentifier || releaseNumber,
+        name: releaseDateLabel,
+        url: item.itemURL,
+        imageUrl: toLeafletTileUrl(item.itemURL),
+        date,
+        year: date.getUTCFullYear(),
+        releaseNum: Number(releaseNumber),
+        releaseDateLabel,
+        itemTitle: item.itemTitle,
+        metadataLayerUrl: item.metadataLayerUrl,
+        layerIdentifier: item.layerIdentifier,
+        provider: 'Esri World Imagery',
+        resolution: 'Varies by location',
+        captureDate: 'See imagery metadata'
+      };
+    })
+    .filter(item => Number.isFinite(item.releaseNum) && !Number.isNaN(item.date.getTime()))
+    .sort((a, b) => b.date - a.date);
+}
+
+function getReleaseDateLabel(item) {
+  if (item.releaseDateLabel) return item.releaseDateLabel;
+
+  const match = item.itemTitle?.match(/(\d{4}-\d{2}-\d{2})/);
+  return match?.[1] || '';
+}
+
+function toLeafletTileUrl(url = '') {
+  return url
+    .replace('{level}', '{z}')
+    .replace('{row}', '{y}')
+    .replace('{col}', '{x}');
+}
+
+/**
+ * Convert latitude/longitude to the Web Mercator tile containing the point.
+ */
+export function getTileCoordinates(point, zoom) {
+  const scale = 2 ** zoom;
+  const latitude = Math.max(-85.05112878, Math.min(85.05112878, point.latitude));
+  const longitude = ((point.longitude + 180) % 360 + 360) % 360 - 180;
+  const column = Math.floor(((longitude + 180) / 360) * scale);
+  const latitudeRadians = latitude * Math.PI / 180;
+  const row = Math.floor(
+    (1 - Math.asinh(Math.tan(latitudeRadians)) / Math.PI) / 2 * scale
+  );
+
+  return { column, row };
+}
+
+async function getLocalChangeCandidates(waybackItems, tile, signal) {
+  if (!waybackItems.length) return [];
+
+  const releaseIndex = new Map(
+    waybackItems.map((item, index) => [item.releaseNum, index])
+  );
+  const candidates = [];
+  let releaseNumber = waybackItems[0].releaseNum;
+  const visited = new Set();
+
+  while (releaseNumber && !visited.has(releaseNumber)) {
+    if (signal?.aborted) {
+      throw new DOMException('The area request was aborted.', 'AbortError');
+    }
+
+    visited.add(releaseNumber);
+
+    const requestUrl = `${config.wayback.tilemapBaseUrl}/tilemap/${releaseNumber}/${tile.level}/${tile.row}/${tile.column}`;
+    const response = await fetch(requestUrl, { signal });
+
+    if (!response.ok) {
+      throw new Error(`Wayback availability request failed (${response.status})`);
+    }
+
+    const tilemap = await response.json();
+    if (!tilemap.data?.[0]) break;
+
+    const changedReleaseNumber = Number(tilemap.select?.[0] || releaseNumber);
+    candidates.push({
+      releaseNumber: changedReleaseNumber,
+      size: Number(tilemap.size?.[0] || 0)
+    });
+
+    const changedReleaseIndex = releaseIndex.get(changedReleaseNumber);
+    releaseNumber = changedReleaseIndex === undefined
+      ? null
+      : waybackItems[changedReleaseIndex + 1]?.releaseNum;
+  }
+
+  return candidates;
+}
+
+/**
+ * Remove consecutive candidates with identical tile sizes, keeping the oldest.
+ * At low zoom levels every candidate is retained because tile sizes are less
+ * useful for identifying duplicate imagery.
+ */
+export function filterDuplicateCandidates(candidates, zoom) {
+  if (zoom <= 11 || candidates.length < 2) return candidates;
+
+  const groups = [];
+
+  candidates.forEach(candidate => {
+    const group = groups[groups.length - 1];
+    if (!group || group[0].size !== candidate.size) {
+      groups.push([candidate]);
+    } else {
+      group.push(candidate);
+    }
+  });
+
+  return groups.map(group => group[group.length - 1]);
+}
+
+/**
+ * Get releases grouped by year.
  */
 export function getReleasesByYear() {
   const grouped = {};
@@ -118,28 +207,18 @@ export function getReleasesByYear() {
     grouped[release.year].push(release);
   });
 
-  // Sort years descending
-  const sortedYears = Object.keys(grouped).sort((a, b) => b - a);
-
   return {
-    years: sortedYears,
-    grouped: grouped
+    years: Object.keys(grouped).sort((a, b) => b - a),
+    grouped
   };
 }
 
-/**
- * Get current release
- */
 export function getCurrentRelease() {
-  if (currentReleaseIndex >= 0 && currentReleaseIndex < releases.length) {
-    return releases[currentReleaseIndex];
-  }
-  return null;
+  return currentReleaseIndex >= 0 && currentReleaseIndex < releases.length
+    ? releases[currentReleaseIndex]
+    : null;
 }
 
-/**
- * Set current release by index
- */
 export function setCurrentRelease(index) {
   if (index >= 0 && index < releases.length) {
     currentReleaseIndex = index;
@@ -148,9 +227,6 @@ export function setCurrentRelease(index) {
   return null;
 }
 
-/**
- * Get next release
- */
 export function getNextRelease() {
   if (currentReleaseIndex > 0) {
     currentReleaseIndex--;
@@ -159,9 +235,6 @@ export function getNextRelease() {
   return null;
 }
 
-/**
- * Get previous release
- */
 export function getPreviousRelease() {
   if (currentReleaseIndex < releases.length - 1) {
     currentReleaseIndex++;
@@ -170,21 +243,14 @@ export function getPreviousRelease() {
   return null;
 }
 
-/**
- * Get release by ID
- */
 export function getReleaseById(id) {
-  const index = releases.findIndex(r => r.id === id);
-  if (index !== -1) {
-    currentReleaseIndex = index;
-    return releases[index];
-  }
-  return null;
+  const index = releases.findIndex(release => release.id === id);
+  if (index === -1) return null;
+
+  currentReleaseIndex = index;
+  return releases[index];
 }
 
-/**
- * Get metadata for a release
- */
 export function getReleaseMetadata(release) {
   if (!release) return null;
 
@@ -194,42 +260,27 @@ export function getReleaseMetadata(release) {
     releaseDate: release.date.toLocaleDateString('en-US', {
       year: 'numeric',
       month: 'long',
-      day: 'numeric'
+      day: 'numeric',
+      timeZone: 'UTC'
     }),
-    provider: 'Maxar Technologies',
-    resolution: '30 cm',
-    captureDate: release.date.toLocaleDateString('en-US', {
-      year: 'numeric',
-      month: 'long',
-      day: 'numeric'
-    })
+    provider: release.provider,
+    resolution: release.resolution,
+    captureDate: release.captureDate
   };
 }
 
-/**
- * Check if there's a next release
- */
 export function hasNextRelease() {
   return currentReleaseIndex > 0;
 }
 
-/**
- * Check if there's a previous release
- */
 export function hasPreviousRelease() {
-  return currentReleaseIndex < releases.length - 1;
+  return currentReleaseIndex >= 0 && currentReleaseIndex < releases.length - 1;
 }
 
-/**
- * Get total number of releases
- */
 export function getTotalReleases() {
   return releases.length;
 }
 
-/**
- * Clear releases
- */
 export function clearReleases() {
   releases = [];
   currentReleaseIndex = -1;
