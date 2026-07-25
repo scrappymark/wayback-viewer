@@ -74,7 +74,7 @@ export function initMap() {
  * Load Wayback imagery for a specific release
  */
 export function loadWaybackImagery(release) {
-  if (!release) return;
+  if (!release || !map) return;
 
   showLoading(true);
 
@@ -87,11 +87,17 @@ export function loadWaybackImagery(release) {
   const tileUrl = release.imageUrl || config.tiles.latest;
   
   // Create new tile layer with Wayback URL
-  imageryLayer = L.tileLayer(tileUrl, {
+  const nextImageryLayer = L.tileLayer(tileUrl, {
     attribution: '© Esri Wayback Imagery',
     opacity: parseFloat(document.getElementById('opacity-slider')?.value || 100) / 100
   });
 
+  imageryLayer = nextImageryLayer;
+  imageryLayer.once('load', () => {
+    if (imageryLayer === nextImageryLayer) {
+      showLoading(false);
+    }
+  });
   imageryLayer.addTo(map);
   imageryLayer.bringToFront();
 
@@ -101,8 +107,10 @@ export function loadWaybackImagery(release) {
   }
 
   setTimeout(() => {
-    showLoading(false);
-  }, 1000);
+    if (imageryLayer === nextImageryLayer) {
+      showLoading(false);
+    }
+  }, config.ui.loadingTimeout);
 }
 
 /**
@@ -119,6 +127,7 @@ export function loadLatestImagery() {
   });
 
   imageryLayer.addTo(map);
+  showLoading(false);
 }
 
 /**
