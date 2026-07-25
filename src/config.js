@@ -10,9 +10,8 @@ export const config = {
 
   // Esri Wayback endpoints
   wayback: {
-    baseUrl: 'https://wayback.maptiles.arcgis.com',
-    imageryService: 'https://services.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer',
-    releasesEndpoint: '/arcgis/rest/services/Wayback/WorldImagery/MapServer?f=json'
+    configUrl: 'https://s3-us-west-2.amazonaws.com/config.maptiles.arcgis.com/waybackconfig.json',
+    tilemapBaseUrl: 'https://wayback.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/MapServer'
   },
 
   // Tile sources

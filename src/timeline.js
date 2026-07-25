@@ -1,7 +1,8 @@
-import { getReleasesByYear, getCurrentRelease, setCurrentRelease } from './wayback.js';
+import { getReleasesByYear } from './wayback.js';
 
 let timelineElement = null;
 let yearDropdown = null;
+let isInitialized = false;
 
 /**
  * Initialize the timeline UI
@@ -13,6 +14,15 @@ export function initTimeline() {
   if (!timelineElement || !yearDropdown) {
     console.error('Timeline elements not found');
     return;
+  }
+
+  if (!isInitialized) {
+    yearDropdown.addEventListener('change', event => {
+      if (event.target.value) {
+        selectYear(event.target.value);
+      }
+    });
+    isInitialized = true;
   }
 }
 
@@ -36,6 +46,14 @@ export function renderTimeline(releases) {
     option.textContent = year;
     yearDropdown.appendChild(option);
   });
+
+  if (years.length === 0) {
+    yearDropdown.disabled = true;
+    timelineElement.innerHTML = '<p class="loading">No timelines available for this area</p>';
+    return;
+  }
+
+  yearDropdown.disabled = false;
   
   // Set first year as default if available
   if (years.length > 0) {
@@ -99,6 +117,8 @@ function selectYear(year) {
   document.querySelectorAll('.year-point').forEach(point => {
     point.classList.toggle('active', point.dataset.year === year);
   });
+
+  showYearInfo(year, releases.length);
   
   // Show first release of that year
   if (releases.length > 0) {
@@ -132,7 +152,7 @@ function showYearInfo(year, count) {
  * Update timeline with current release
  */
 export function updateTimelineCurrent(release) {
-  if (!release) return;
+  if (!release || !yearDropdown) return;
   
   // Update dropdown
   yearDropdown.value = release.year;
@@ -143,10 +163,12 @@ export function updateTimelineCurrent(release) {
   });
   
   // Show release info
-  const month = release.date.getMonth() + 1;
-  const shortMonth = release.date.toLocaleDateString('en-US', { month: 'short' });
+  const shortMonth = release.date.toLocaleDateString('en-US', {
+    month: 'short',
+    timeZone: 'UTC'
+  });
   
-  showReleaseInfo(release.name, `${shortMonth} ${release.date.getDate()}`);
+  showReleaseInfo(release.name, `${shortMonth} ${release.date.getUTCDate()}`);
 }
 
 /**

@@ -1,6 +1,6 @@
 // Main application entry point
-import { initMap, loadWaybackImagery, loadLatestImagery, toggleLabels, setOpacity, goToTomasOppus, searchLocation, copyCoordinates, exportCoordinates, toggleMeasure, toggleDraw, locateUser, showToast } from './map.js';
-import { fetchReleases, getCurrentRelease, getNextRelease, getPreviousRelease, getReleaseMetadata, hasNextRelease, hasPreviousRelease, setCurrentRelease } from './wayback.js';
+import { initMap, getMap, loadWaybackImagery, loadLatestImagery, toggleLabels, setOpacity, goToTomasOppus, searchLocation, copyCoordinates, exportCoordinates, toggleMeasure, toggleDraw, locateUser, showToast } from './map.js';
+import { fetchReleases, getCurrentRelease, getNextRelease, getPreviousRelease, getReleaseById, getReleaseMetadata, hasNextRelease, hasPreviousRelease } from './wayback.js';
 import { initTimeline, renderTimeline, updateTimelineCurrent } from './timeline.js';
 import { renderMetadata } from './metadata.js';
 import { initUI, updateNavigationButtons, initResponsive } from './ui.js';
@@ -8,6 +8,8 @@ import { initUI, updateNavigationButtons, initResponsive } from './ui.js';
 // Application state
 let currentRelease = null;
 let isDarkMode = false;
+let areaRequestController = null;
+let areaRefreshTimer = null;
 
 /**
  * Initialize the application
@@ -26,14 +28,11 @@ async function initApp() {
   
   // Setup event handlers
   setupEventHandlers();
+  setupAreaChangeHandler(map);
   console.log('✅ Event handlers setup');
   
-  // Fetch and display releases
-  await loadReleases();
-  
-  // Load latest imagery by default
-  loadLatestImagery();
-  console.log('✅ Latest imagery loaded');
+  // Fetch releases available at the initial map location.
+  await loadReleasesForArea(map, true);
   
   // Show welcome message
   showToast('Welcome to Wayback Viewer! 🛰', 'success');
@@ -44,28 +43,59 @@ async function initApp() {
 /**
  * Load and display releases
  */
-async function loadReleases() {
+async function loadReleasesForArea(map, announce = false) {
+  areaRequestController?.abort();
+  areaRequestController = new AbortController();
+  const requestController = areaRequestController;
+  const center = map.getCenter();
+
   try {
-    showToast('Loading releases...', 'info');
+    if (announce) {
+      showToast('Loading available timelines...', 'info');
+    }
     
-    const releases = await fetchReleases();
-    console.log(`📅 Loaded ${releases.length} releases`);
+    const releases = await fetchReleases(
+      { latitude: center.lat, longitude: center.lng },
+      map.getZoom(),
+      { signal: requestController.signal }
+    );
+
+    if (requestController !== areaRequestController) return;
     
     renderTimeline(releases);
     
-    // Set first release as current
     if (releases.length > 0) {
-      setCurrentRelease(0);
-      currentRelease = getCurrentRelease();
-      updateTimelineCurrent(currentRelease);
+      loadRelease(getCurrentRelease());
+      if (announce) {
+        showToast(`Loaded ${releases.length} available timeline${releases.length === 1 ? '' : 's'}`, 'success');
+      }
+    } else {
+      currentRelease = null;
+      renderMetadata(null);
       updateNavigationState();
+      loadLatestImagery();
+      showToast('No archived imagery changes are available for this area', 'info');
     }
-    
-    showToast(`Loaded ${releases.length} releases`, 'success');
   } catch (error) {
+    if (error.name === 'AbortError' || requestController.signal.aborted) return;
+
     console.error('Failed to load releases:', error);
-    showToast('Failed to load releases', 'error');
+    showToast('Failed to load timelines for this area', 'error');
   }
+}
+
+/**
+ * Refresh available releases whenever the visible map area changes.
+ */
+function setupAreaChangeHandler(map) {
+  const refresh = () => {
+    clearTimeout(areaRefreshTimer);
+    areaRefreshTimer = setTimeout(() => {
+      loadReleasesForArea(map);
+    }, 250);
+  };
+
+  map.on('moveend zoomend', refresh);
 }
 
 /**
@@ -242,20 +272,22 @@ function handleEscape() {
  * Load a specific release
  */
 function loadRelease(release) {
-  currentRelease = release;
+  const selectedRelease = getReleaseById(release?.id);
+  if (!selectedRelease) return;
+
+  currentRelease = selectedRelease;
   
   // Update UI
-  updateTimelineCurrent(release);
+  updateTimelineCurrent(selectedRelease);
   updateNavigationState();
   
   // Render metadata
-  const metadata = getReleaseMetadata(release);
+  const metadata = getReleaseMetadata(selectedRelease);
   renderMetadata(metadata);
   
-  // Load imagery - pass the entire release object, not just URL
-  loadWaybackImagery(release);
+  loadWaybackImagery(selectedRelease);
   
-  console.log(`🗺️ Loaded release: ${release.name}`);
+  console.log(`🗺️ Loaded release: ${selectedRelease.name}`);
 }
 
 /**
@@ -285,5 +317,5 @@ window.waybackViewer = {
   jumpToTomasOppus,
   loadLatestImagery,
   toggleDarkMode: handleDarkMode,
-  getMap: () => import('./map.js').then(m => m.getMap())
+  getMap
 };
