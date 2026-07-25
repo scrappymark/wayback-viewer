@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Esri Wayback Clone - Historical Imagery Viewer</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <link rel="stylesheet" href="src/styles.css">
+</head>
+<body>
+  <div id="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo">
+        <h1>🛰 Wayback Viewer</h1>
+      </div>
+      <div class="search-container">
+        <input type="text" id="search-input" placeholder="Search location..." />
+        <button id="search-btn" title="Search">🔍</button>
+      </div>
+      <button id="geolocation-btn" class="icon-btn" title="My Location">📍</button>
+      <button id="dark-mode-btn" class="icon-btn" title="Toggle Dark Mode">🌙</button>
+      <button id="tomas-opps-btn" class="icon-btn" title="Jump to Tomas Oppus">🏠</button>
+    </header>
+
+    <!-- Main Content -->
+    <div class="main-content">
+      <!-- Sidebar -->
+      <aside class="sidebar">
+        <div class="wayback-controls">
+          <h2>Wayback</h2>
+          
+          <!-- Year Dropdown -->
+          <div class="year-selector">
+            <select id="year-dropdown">
+              <option value="">Select Year</option>
+            </select>
+          </div>
+
+          <!-- Navigation Buttons -->
+          <div class="nav-buttons">
+            <button id="prev-btn" title="Previous Release">◀ Previous</button>
+            <button id="next-btn" title="Next Release">Next ▶</button>
+          </div>
+
+          <!-- Timeline Visualization -->
+          <div class="timeline-container">
+            <h3>Timeline</h3>
+            <div id="timeline"></div>
+          </div>
+
+          <!-- Metadata Panel -->
+          <div class="metadata-panel">
+            <h3>Metadata</h3>
+            <div id="metadata">
+              <p class="loading">Select a release to view metadata</p>
+            </div>
+          </div>
+
+          <!-- Extra Controls -->
+          <div class="extra-controls">
+            <h3>Tools</h3>
+            
+            <div class="control-group">
+              <label for="opacity-slider">Layer Opacity</label>
+              <input type="range" id="opacity-slider" min="0" max="100" value="100" />
+            </div>
+
+            <div class="control-group">
+              <label>
+                <input type="checkbox" id="labels-toggle" />
+                Show Satellite Labels
+              </label>
+            </div>
+
+            <div class="control-group">
+              <button id="measure-btn" class="tool-btn">📏 Measure</button>
+              <button id="draw-btn" class="tool-btn">✏️ Draw Polygon</button>
+            </div>
+
+            <div class="control-group">
+              <button id="export-coords-btn" class="tool-btn">📤 Export Coords</button>
+              <button id="copy-coords-btn" class="tool-btn">📋 Copy Coords</button>
+            </div>
+
+            <div class="control-group shortcuts-info">
+              <h4>Keyboard Shortcuts</h4>
+              <ul>
+                <li><kbd>←</kbd> / <kbd>→</kbd> Navigate releases</li>
+                <li><kbd>F</kbd> Fullscreen</li>
+                <li><kbd>D</kbd> Dark mode</li>
+                <li><kbd>M</kbd> Measure tool</li>
+                <li><kbd>G</kbd> Geolocation</li>
+              </ul>
+            </div>
+          </div>
+        </div>
+      </aside>
+
+      <!-- Map Container -->
+      <main class="map-wrapper">
+        <div id="map"></div>
+        
+        <!-- Loading Spinner -->
+        <div id="loading-spinner" class="hidden">
+          <div class="spinner"></div>
+          <p>Loading imagery...</p>
+        </div>
+
+        <!-- Toast Notifications -->
+        <div id="toast-container"></div>
+      </main>
+    </div>
+  </div>
+
+  <!-- Leaflet JS -->
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  
+  <!-- App Modules -->
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
